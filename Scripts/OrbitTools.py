@@ -1,9 +1,7 @@
 import time
-import math
 import krpc
 from RendezvousTools import *
-
-e = math.e
+from math import e
 
 
 class OrbitTools:
@@ -137,7 +135,6 @@ class OrbitTools:
         self.vessel.control.throttle = 1.0
         # Perform most of the burn, stopping when half a second is remaining.
         while self.get_burn_time(nd.remaining_delta_v) > slow_burn_time:
-            time.sleep(0.1)
             burn_direction = nd.remaining_burn_vector(self.vessel.surface_reference_frame)
             self.vessel.auto_pilot.target_direction = burn_direction
 
@@ -147,7 +144,6 @@ class OrbitTools:
         while nd.remaining_delta_v > 0.5:
             burn_direction = nd.remaining_burn_vector(self.vessel.surface_reference_frame)
             self.vessel.auto_pilot.target_direction = burn_direction
-            time.sleep(0.01)
         # Throttle Off
         self.vessel.control.throttle = 0.0
 
