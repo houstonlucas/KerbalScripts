@@ -22,13 +22,7 @@ class OrbitTools:
         self.parking_orbit_alt = 80000
         self.close_in_factor = 0.95
         self.inclination = 90
-
-    def reset_control_parameters_to_default(self):
-        # Constants
-        self.ascent_angle_flatten_alt = 41000
-        self.parking_orbit_alt = 80000
-        self.close_in_factor = 0.95
-        self.inclination = 90
+        self.slow_burn_throttle = 0.2
 
     def create_circularization_node(self, dp, threshold):
         nd = self.vessel.control.add_node(self.ksc.ut + self.vessel.orbit.time_to_apoapsis, 0.0)
@@ -117,7 +111,7 @@ class OrbitTools:
     #  slow_burn_time: How much of the burn is reserved for slow burn.
     # Assumptions:
     #  Relative Inclination near zero
-    def execute_next_node(self, remove_after=True, buffer_time=10.0, slow_burn_time=0.5):
+    def execute_next_node(self, buffer_time=10.0, slow_burn_time=0.5):
         nd = self.vessel.control.nodes[0]
         burn_direction = nd.direction(self.vessel.surface_reference_frame)
         self.vessel.auto_pilot.target_direction = burn_direction
@@ -139,16 +133,49 @@ class OrbitTools:
             self.vessel.auto_pilot.target_direction = burn_direction
 
         # Start slow burn
-        self.vessel.control.throttle = 0.1
+        self.vessel.control.throttle = self.slow_burn_throttle
         # Home in on remainder of burn.
         while nd.remaining_delta_v > 0.5:
             burn_direction = nd.remaining_burn_vector(self.vessel.surface_reference_frame)
             self.vessel.auto_pilot.target_direction = burn_direction
         # Throttle Off
         self.vessel.control.throttle = 0.0
+        nd.remove()
 
-        if remove_after:
-            nd.remove()
+    def execute_node_with_feedback(self, feedback_function, threshold=0.1,
+                                   buffer_time=10.0, slow_burn_time=0.5):
+        nd = self.vessel.control.nodes[0]
+        burn_direction = nd.direction(self.vessel.surface_reference_frame)
+        self.vessel.auto_pilot.target_direction = burn_direction
+        self.vessel.auto_pilot.engage()
+
+        dv = nd.delta_v
+        burn_time = self.get_burn_time(dv)
+        print("Expecting {}s burn.".format(burn_time))
+        print("Warping")
+        self.ksc.warp_to(nd.ut - (burn_time / 2.0) - buffer_time)
+        burn_direction = nd.direction(self.vessel.surface_reference_frame)
+        self.vessel.auto_pilot.target_direction = burn_direction
+        time.sleep(buffer_time)
+
+        self.vessel.control.throttle = 1.0
+        # Perform most of the burn, stopping when half a second is remaining.
+        while self.get_burn_time(nd.remaining_delta_v) > slow_burn_time:
+            burn_direction = nd.remaining_burn_vector(self.vessel.surface_reference_frame)
+            self.vessel.auto_pilot.target_direction = burn_direction
+
+        # Start slow burn
+        self.vessel.control.throttle = self.slow_burn_throttle
+        # Home in on remainder of burn.
+        feedback = feedback_function(self.vessel)
+        while feedback > threshold:
+            print(feedback)
+            time.sleep(0.001)
+            feedback = feedback_function(self.vessel)
+        # Throttle Off
+        self.vessel.control.throttle = 0.0
+        nd.remove()
+
 
     def stage_if_needed(self, ):
         resources_in_stage = self.vessel.resources_in_decouple_stage(self.vessel.control.current_stage - 1, True)
@@ -207,15 +234,9 @@ class OrbitTools:
             relative_v = target.velocity(frame)
             self.vessel.auto_pilot.target_direction = relative_v
 
-        # Start medium burn
-        self.vessel.control.throttle = 0.1
-        while get_magnitude(relative_v) > medium_threshold:
-            relative_v = target.velocity(frame)
-            self.vessel.auto_pilot.target_direction = relative_v
-
         # Start slow burn
-        self.vessel.control.throttle = 0.01
-        while get_magnitude(relative_v) > final_threshold:
+        self.vessel.control.throttle = self.slow_burn_throttle
+        while get_magnitude(relative_v) > medium_threshold:
             relative_v = target.velocity(frame)
             self.vessel.auto_pilot.target_direction = relative_v
 
@@ -235,5 +256,3 @@ class OrbitTools:
         self.vessel.control.throttle = 1.0
         time.sleep(burn_time)
         self.vessel.control.throttle = 0.0
-
-
