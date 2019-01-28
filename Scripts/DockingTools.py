@@ -17,7 +17,7 @@ class DockingInstance:
         self.x_vel_pid = PidController(gains=lat_vel_pid_gains, effort_bounds=vel_bounds)
         self.y_vel_pid = PidController(gains=long_vel_pid_gains, effort_bounds=vel_bounds)
 
-        lat_pid_gains = (1.2, 0.0, 0.8)
+        lat_pid_gains = (1.4, 0.0, 0.4)
         long_pid_gains = (1.4, 0.0, 1.2)
         rcs_effort_bounds = (-1.0, 1.0)
 
@@ -85,15 +85,13 @@ class DockingInstance:
     def shutdown(self):
         print("Shutting Down")
         self.is_running = False
-        self.control.disengage()
-        self.control.sas = True
+        self.ot.auto_off()
         self.control.rcs = False
 
     def orient_to_target(self, wait=True):
         target_direction = self.target_port.direction(self.orbital_frame)
         self.auto_pilot.target_direction = tuple(-di for di in target_direction)
-        self.control.sas = False
-        self.auto_pilot.engage()
+        self.ot.auto_on()
         if wait:
             while self.auto_pilot.error > self.auto_pilot_error_threshold:
                 time.sleep(0.1)
@@ -105,7 +103,7 @@ class DockingInstance:
         x_vel, y_vel, z_vel = self.relative_vel = relative_vel
 
         dist_2_targ = np.linalg.norm(self.target_part.position(self.my_frame))
-        approach_speed = (self.docking_approach_speed + 0.1 * y)
+        approach_speed = (self.docking_approach_speed + 0.4 * y)
         self.target_distance = dist_2_targ - approach_speed * dt
 
         self.z_vel_cmd = self.z_pid.get_effort(0.0, z, dt)
@@ -114,7 +112,6 @@ class DockingInstance:
         self.up_cmd = self.z_vel_pid.get_effort(self.z_vel_cmd, z_vel, dt)
         self.right_cmd = -self.x_vel_pid.get_effort(self.x_vel_cmd, x_vel, dt)
         self.forward_cmd = -self.y_vel_pid.get_effort(self.y_vel_cmd, y_vel, dt)
-
 
     def apply_controls(self):
         self.control.up = self.up_cmd
@@ -140,6 +137,15 @@ class DockingInstance:
     def cycle_rcs(self):
         self.control.rcs = not self.control.rcs
 
+    def check_end_condition(self):
+        end_condition_states = [
+            self.ot.ksc.DockingPortState.docked,
+            self.ot.ksc.DockingPortState.docking
+        ]
+        if self.my_docking_port.state in end_condition_states:
+            print("Succesfully docked")
+            self.is_running = False
+
 
 def docking_assist(ot):
     dt = 0.1
@@ -150,7 +156,6 @@ def docking_assist(ot):
 
     iterations = 0
     while docking_controller.is_running:
-        time.sleep(dt)
         iterations += 1
         docking_controller.compute_controls(dt)
         docking_controller.apply_controls()
@@ -158,4 +163,6 @@ def docking_assist(ot):
             docking_controller.cycle_rcs()
             docking_controller.print_stats()
 
+        time.sleep(dt)
+        docking_controller.check_end_condition()
     docking_controller.shutdown()
