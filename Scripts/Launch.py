@@ -2,12 +2,10 @@ import math
 import sys
 
 from OrbitTools import *
-from Scripts.DockingTools import docking_assist
+from DockingTools import docking_assist
+from Misc import mining_operations
 
 e = math.e
-
-
-# TODO use this for better burn time calculation
 
 
 def main():
@@ -27,6 +25,8 @@ def main():
     elif sys.argv[1] == "docking_assist":
         time.sleep(5)
         docking_assist(ot)
+    elif sys.argv[1] == "mining_operations":
+        mining_operations(ot)
     else:
         print("invalid command")
 
