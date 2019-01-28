@@ -39,8 +39,7 @@ def find_optimal_rendevous_period(period, target_period, target_lag, mu, valid_n
     dvs = map(lambda vn: abs(v - vn), potential_v)
     dv = min(dvs)
     index = dvs.index(dv)
-    print("{} orbits to intersect.".format(valid_n[index]))
-    return potential_period[index]
+    return potential_period[index], valid_n[index]
 
 
 def calculate_target_lag(vessel, target):
@@ -70,7 +69,11 @@ def velocity_from_semi_major(a, mu):
 
 
 def get_next_approach(vessel, target):
-    return vessel.orbit.list_closest_approaches(target, 1)[0][0]
+    approaches = vessel.orbit.list_closest_approaches(target.orbit, 2)
+    if len(approaches) > 1:
+        return approaches[0][0]
+    else:
+        return approaches[0][0]
 
 
 def get_magnitude(x):
