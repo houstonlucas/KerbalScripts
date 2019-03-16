@@ -7,9 +7,18 @@ from customPid import PidController
 class DockingInstance:
     def __init__(self, ot):
 
+        self.settle_factor = 100.0
+        self.cone_slope = 20.0
+        self.min_cone_width = 0.01
+
+        self.cone_width = None
+        self.settled_speed = None
+        self.lateral_error = None
+        self.lateral_speed = None
+
         self.is_running = True
 
-        lat_vel_pid_gains = (0.7, 0.0, 0.2)
+        lat_vel_pid_gains = (2.2, 0.0, 0.3)
         long_vel_pid_gains = (0.5, 0.0, 0.2)
         vel_bounds = (-0.75, 0.75)
 
@@ -17,8 +26,8 @@ class DockingInstance:
         self.x_vel_pid = PidController(gains=lat_vel_pid_gains, effort_bounds=vel_bounds)
         self.y_vel_pid = PidController(gains=long_vel_pid_gains, effort_bounds=vel_bounds)
 
-        lat_pid_gains = (1.4, 0.0, 0.4)
-        long_pid_gains = (1.4, 0.0, 1.2)
+        lat_pid_gains = (3.5, 0.0, 3.0)
+        long_pid_gains = (1.4, 0.0, 0.8)
         rcs_effort_bounds = (-1.0, 1.0)
 
         self.z_pid = PidController(gains=lat_pid_gains, effort_bounds=rcs_effort_bounds)
@@ -51,13 +60,20 @@ class DockingInstance:
         self.target_frame = None
 
     def acquire_target_info(self):
+        self.select_self_docking_port()
         self.target_port_selection()
-        self.my_docking_port = self.ot.vessel.parts.docking_ports[0]
         self.my_frame = self.my_docking_port.reference_frame
         self.target_frame = self.target_port.reference_frame
 
         dist_2_targ = np.linalg.norm(self.target_part.position(self.my_frame))
         self.target_distance = dist_2_targ
+
+    def select_self_docking_port(self):
+        if self.ot.vessel.parts.controlling.docking_port is None:
+            self.my_docking_port = self.ot.vessel.parts.docking_ports[0]
+            self.ot.vessel.parts.controlling = self.my_docking_port.part
+        else:
+            self.my_docking_port = self.ot.vessel.parts.controlling.docking_port
 
     def target_port_selection(self):
         if self.ot.ksc.target_docking_port is None:
@@ -102,12 +118,21 @@ class DockingInstance:
         x, y, z = self.relative_pos = relative_pos
         x_vel, y_vel, z_vel = self.relative_vel = relative_vel
 
-        dist_2_targ = np.linalg.norm(self.target_part.position(self.my_frame))
-        approach_speed = (self.docking_approach_speed + 0.4 * y)
-        self.target_distance = dist_2_targ - approach_speed * dt
+        dist_2_targ = np.linalg.norm(relative_pos)
+
+        self.lateral_error = np.sqrt(x**2 + z**2)
+        self.lateral_speed = np.sqrt(x_vel**2 + z_vel**2)
+
+        # If inside cone x < y * m, and lateral speed is small
+        self.cone_width = (y / self.cone_slope) + self.min_cone_width
+        self.settled_speed = 2.0 * self.cone_width / self.settle_factor
+        if self.lateral_error <= self.cone_width and self.lateral_speed <= self.settled_speed:
+            approach_speed = (self.docking_approach_speed + (0.4 * y + 0.05))
+            self.target_distance = y - approach_speed * dt
 
         self.z_vel_cmd = self.z_pid.get_effort(0.0, z, dt)
         self.x_vel_cmd = self.x_pid.get_effort(0.0, x, dt)
+
         self.y_vel_cmd = self.y_pid.get_effort(self.target_distance, y, dt)
         self.up_cmd = self.z_vel_pid.get_effort(self.z_vel_cmd, z_vel, dt)
         self.right_cmd = -self.x_vel_pid.get_effort(self.x_vel_cmd, x_vel, dt)
@@ -121,7 +146,9 @@ class DockingInstance:
     def print_stats(self):
         msg = ""
         msg += "*" * 50 + "\n"
-        msg += "Target Distance:\n\t\t%0.3f\n" % self.target_distance
+        msg += "Target Distance: {:.3f}\t\t Hold Point: {:.3f}\n".format(self.relative_pos[1], self.target_distance)
+        msg += "Lateral Error: {:.3f}\t\t Lateral Speed: {:.3f}\n".format(self.lateral_error, self.lateral_speed)
+        msg += "Cone width: {:.3f}\n".format(self.cone_width)
         msg += "Measured Position:\n\tx:%0.2f, y:%0.2f, z:%0.2f\n" % self.relative_pos
         msg += "Measured Velocity:\n\tx:%0.2f, y:%0.2f, z:%0.2f\n" % self.relative_vel
         msg += "Command Velocity:\n\tx:%0.2f, y:%0.2f, z:%0.2f\n" % (self.x_vel_cmd, self.y_vel_cmd, self.z_vel_cmd)
@@ -139,8 +166,7 @@ class DockingInstance:
 
     def check_end_condition(self):
         end_condition_states = [
-            self.ot.ksc.DockingPortState.docked,
-            self.ot.ksc.DockingPortState.docking
+            self.ot.ksc.DockingPortState.docked
         ]
         if self.my_docking_port.state in end_condition_states:
             print("Succesfully docked")
