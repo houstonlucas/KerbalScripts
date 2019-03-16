@@ -1,0 +1,4 @@
+
+
+class AssumptionViolation(Exception):
+    pass
