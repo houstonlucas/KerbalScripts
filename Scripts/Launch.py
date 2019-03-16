@@ -1,9 +1,13 @@
 import math
 import sys
+import time
 
+from Scripts.LandingTools import landing_script
 from OrbitTools import *
 from DockingTools import docking_assist
 from Misc import mining_operations
+from ManeuverTools import plan_maneuver
+import CustomErrors as errors
 
 e = math.e
 
@@ -12,23 +16,30 @@ def main():
     ot = OrbitTools("Launch Script")
 
     print(sys.argv[1])
-    _ = raw_input("Press Enter to Continue")
+    _ = str(input("Press Enter to Continue"))
 
-    if sys.argv[1] == "launch":
-        launch(ot)
-    elif sys.argv[1] == "execute_node":
-        execute_node(ot)
-    elif sys.argv[1] == "circularize":
-        circularize(ot)
-    elif sys.argv[1] == "rendezvous":
-        rendezvous(ot)
-    elif sys.argv[1] == "docking_assist":
-        time.sleep(5)
-        docking_assist(ot)
-    elif sys.argv[1] == "mining_operations":
-        mining_operations(ot)
-    else:
-        print("invalid command")
+    try:
+        if sys.argv[1] == "launch":
+            launch(ot)
+        elif sys.argv[1] == "execute_node":
+            execute_node(ot)
+        elif sys.argv[1] == "circularize":
+            circularize(ot)
+        elif sys.argv[1] == "rendezvous":
+            rendezvous(ot)
+        elif sys.argv[1] == "docking_assist":
+            docking_assist(ot)
+        elif sys.argv[1] == "mining_operations":
+            mining_operations(ot)
+        elif sys.argv[1] == "landing_script":
+            landing_script(ot)
+        elif sys.argv[1] == "planner_test":
+            plan_maneuver(ot)
+        else:
+            print("invalid command")
+
+    except errors.AssumptionViolation as error:
+        print("Assumption was violated: {}".format(error.msg))
 
 
 def rendezvous(ot):
@@ -36,7 +47,7 @@ def rendezvous(ot):
 
 
 def circularize(ot):
-    ot.create_circularization_node(1000, 0.01)
+    ot.create_circularization_node(100, 0.01)
     ot.execute_next_node()
 
 
@@ -49,6 +60,8 @@ def launch(ot):
     ot.vessel.control.sas = False
     ot.vessel.control.rcs = False
     ot.vessel.control.throttle = 1.0
+
+    ot.set_launch_params()
 
     countdown()
 
@@ -69,18 +82,16 @@ def launch(ot):
         ot.set_twr(desired_twr, dt)
         time.sleep(dt)
 
-    ot.vessel.auto_pilot.disengage()
-    ot.vessel.control.sas = True
+    ot.auto_off()
 
     # Coast through atmosphere
     print("Coasting")
     ot.vessel.control.throttle = 0.0
     ot.wait_until_drag_is_negligible()
 
-    ot.vessel.control.sas = False
-    ot.vessel.auto_pilot.engage()
+    ot.auto_on()
 
-    ot.create_circularization_node(1000, 0.001)
+    ot.create_circularization_node(100, 0.001)
     ot.execute_next_node()
 
     ot.auto_off()
