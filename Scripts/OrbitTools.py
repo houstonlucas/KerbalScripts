@@ -40,6 +40,37 @@ class OrbitTools:
 
         )
 
+    def set_launch_params(self):
+        body_name = self.vessel.orbit.body.name
+        if body_name == "Kerbin":
+            self.parking_orbit_alt = 75000
+            self.ascent_angle_flatten_alt = 33000
+        elif body_name == "Ike":
+            self.parking_orbit_alt = 54000
+            self.ascent_angle_flatten_alt = 8000
+        elif body_name == "Mun":
+            self.parking_orbit_alt = 35000
+            self.ascent_angle_flatten_alt = 6000
+        else:
+            self.parking_orbit_alt = 54000
+            self.ascent_angle_flatten_alt = 8000
+
+    def get_target(self):
+        target = self.ksc.target_vessel
+        if target:
+            return target
+        target = self.ksc.target_body
+        if target:
+            return target
+
+        return None
+
+    def get_target_orbit(self):
+        target = self.get_target()
+        if target:
+            return target.orbit
+        return None
+
     def create_circularization_node(self, dp, threshold):
         nd = self.vessel.control.add_node(self.ksc.ut + self.vessel.orbit.time_to_apoapsis, 0.0)
         offset = 0.0
@@ -138,7 +169,7 @@ class OrbitTools:
         burn_time = self.get_burn_time(dv)
         burn_throttle = 1.0
 
-        small_burn_ratio = 4.0
+        small_burn_ratio = 5.0
         if burn_time < 2.0:
             burn_throttle /= small_burn_ratio
             burn_time *= small_burn_ratio
@@ -187,6 +218,7 @@ class OrbitTools:
             self.vessel.auto_pilot.target_direction = burn_direction
         # Throttle Off
         self.vessel.control.throttle = 0.0
+        self.auto_off()
         nd.remove()
 
     def execute_node_with_feedback(self, feedback_function, threshold=0.1,
@@ -256,7 +288,7 @@ class OrbitTools:
         self.vessel.control.throttle = throttle
 
     def get_ascent_twr(self):
-        initial_twr = 3.0
+        initial_twr = 2.0
         initial_speed_trigger = 150.0
         secondary_speed_trigger = 280.0
         low_atmos_twr = 1.6
@@ -279,7 +311,7 @@ class OrbitTools:
     def rendezvous_with_target(self, max_number_of_orbits=10):
         target = self.ksc.target_vessel
 
-        inclination_threshold = 0.1
+        inclination_threshold = 0.05
 
         # Match inclinations
         if self.vessel.orbit.relative_inclination(target.orbit) > inclination_threshold:
