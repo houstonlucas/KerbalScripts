@@ -1,7 +1,7 @@
 
 class PidController:
     def __init__(self, gains=(0.0, 0.0, 0.0),
-                 effort_bounds=(0.0, 0.0),
+                 effort_bounds=(-1.0, 1.0),
                  integral_threshold=0.25):
         self.k_p, self.k_i, self.k_d = gains
         self.e_prev, self.i_prev = None, 0.0
