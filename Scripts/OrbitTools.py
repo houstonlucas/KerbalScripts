@@ -393,6 +393,7 @@ class OrbitTools:
     def auto_off(self):
         self.vessel.auto_pilot.disengage()
         self.vessel.control.sas = True
+        self.vessel.control.throttle = 0.0
 
     def auto_on(self):
         self.vessel.control.sas = False

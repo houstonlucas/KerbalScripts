@@ -1,4 +1,3 @@
-
 class PidController:
     def __init__(self, gains=(0.0, 0.0, 0.0),
                  effort_bounds=(-1.0, 1.0),
@@ -26,3 +25,6 @@ class PidController:
         effort = self.k_p * p + self.k_i * i + self.k_d * d
         effort = max(min(effort, self.max_effort), self.min_effort)
         return effort
+
+    def set_bounds(self, effort_bounds):
+        self.min_effort, self.max_effort = effort_bounds
