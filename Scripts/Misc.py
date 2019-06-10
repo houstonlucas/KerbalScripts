@@ -1,5 +1,5 @@
 import time
-
+import numpy as np
 
 class MiningOperations:
     def __init__(self, ot):
@@ -48,3 +48,23 @@ def mining_operations(ot):
     m_ops.warp_until_full()
     m_ops.deactivate_equipment()
     m_ops.retract_equipment()
+
+
+def norm(v):
+    return np.linalg.norm(v)
+
+
+def angle_between_vectors(u, v, convert2deg=True):
+    """ Compute the angle between vector u and v
+        Directly from krpc docs.
+        https://krpc.github.io/krpc/tutorials/pitch-heading-roll.html
+    """
+    dp = np.dot(u, v)
+    if dp == 0:
+        return 0
+    u_norm = norm(u)
+    v_norm = norm(v)
+    angle = np.math.acos(dp / (u_norm * v_norm))
+    if convert2deg:
+        angle *= (180. / np.pi)
+    return angle
