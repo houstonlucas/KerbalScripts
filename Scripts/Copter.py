@@ -165,8 +165,8 @@ class Copter:
         self.yaw_rate_pid = None
         self.vert_cal_pid = None
         self.direct_torque_pid = None
-        self.landing_descent_speed = -1.0
-        self.max_landing_descent_speed = -3.0
+        self.landing_descent_speed = -0.5
+        self.max_landing_descent_speed = -4.0
         self.init_controllers()
 
         # Calibration Data
@@ -177,25 +177,25 @@ class Copter:
 
     def init_controllers(self):
         # Vertical Speed
-        vs_gains = (1.5, 0.1, 0.7)
-        vs_bounds = (-10.0, 15.0)
+        vs_gains = (0.8, 0.1, 0.2)
+        vs_bounds = (-5.0, 5.0)
         self.vert_vel_pid = PidController(
             gains=vs_gains,
             effort_bounds=vs_bounds,
-            integral_threshold=2.0
+            integral_threshold=3.0
         )
 
         # Vertical Acceleration
-        vert_accel_gains = (0.6, 0.0, 0.001)
-        vert_accel_bounds = (-10.0, 10.0)
+        vert_accel_gains = (1.8, 0.0, 0.0)
+        vert_accel_bounds = (-2.0, 2.0)
         self.vert_accel_pid = PidController(
             gains=vert_accel_gains,
             effort_bounds=vert_accel_bounds
         )
 
         # Lateral Velocity
-        lateral_vel_gains = (2500.0, 0.0, 200.0)
-        lateral_vel_bounds = (-50, 50)
+        lateral_vel_gains = (2500.0, 0.0, 400.0)
+        lateral_vel_bounds = (-20, 20)
         self.y_vel_pid = PidController(
             gains=lateral_vel_gains,
             effort_bounds=lateral_vel_bounds
@@ -206,7 +206,7 @@ class Copter:
         )
 
         # Lateral Acceleration
-        lateral_accel_gains = (0.4, 0.0, 0.2)
+        lateral_accel_gains = (0.8, 0.0, 0.0)
         lateral_accel_bounds = (-10, 10)
         self.y_accel_pid = PidController(
             gains=lateral_accel_gains,
@@ -218,7 +218,7 @@ class Copter:
         )
 
         # Roll and Pitch Rates
-        roll_pitch_rate_gains = (5.0, 0.0, 1.5)
+        roll_pitch_rate_gains = (1.8, 0.0, 1.0)
         roll_pitch_rate_bounds = (-10.0, 10.0)
         self.roll_rate_pid = PidController(
             gains=roll_pitch_rate_gains,
@@ -229,7 +229,7 @@ class Copter:
             effort_bounds=roll_pitch_rate_bounds
         )
 
-        yaw_gains = (0.5, 0.0, 0.2)
+        yaw_gains = (0.2, 0.0, 0.2)
         yaw_bounds = (-1.0, 1.0)
         self.yaw_rate_pid = PidController(
             gains=yaw_gains,
@@ -315,11 +315,11 @@ class Copter:
 
     def _vertical_control_helper(self):
         # Compute and return vertical thrust (Global Frame)
-        target_alt = self.pos_setpoint[2]
+        target_alt = self.pos_setpoint[0]
         vs_cmd = self.vert_vel_pid.get_effort(target_alt, self.altitude, self.dt)
 
-        vs_desired = vs_cmd + self.vel_setpoint[2]
-        vs = self.velocity_g[2]
+        vs_desired = vs_cmd + self.vel_setpoint[0]
+        vs = self.velocity_g[0]
         vert_accel_cmd = self.vert_accel_pid.get_effort(vs_desired, vs, self.dt)
 
         desired_vert_accel = vert_accel_cmd + self.gravity
@@ -337,9 +337,9 @@ class Copter:
 
     def _horizontal_control_helper(self, total_thrust):
         # Compute desired velocity
-        y_target, z_target, _ = self.pos_setpoint
-        y_vel_target, z_vel_target, _ = self.vel_setpoint
-        y_pos, z_pos, alt = self.position_g
+        _, y_target, z_target = self.pos_setpoint
+        _, y_vel_target, z_vel_target = self.vel_setpoint
+        _, y_pos, z_pos = self.position_g
         y_vel_cmd = self.y_vel_pid.get_effort(y_target, y_pos, self.dt)
         z_vel_cmd = self.z_vel_pid.get_effort(z_target, z_pos, self.dt)
         y_vel_desired = y_vel_cmd + y_vel_target
@@ -466,7 +466,7 @@ class Copter:
         self.radar_alt = self.surface_flight.surface_altitude
         latitude = self.surface_flight.latitude
         longitude = self.surface_flight.longitude
-        self.position_g = latitude, longitude, self.altitude
+        self.position_g = self.altitude, latitude, longitude
 
     def _update_velocity(self):
         vel = self.body_flight.velocity
@@ -543,11 +543,10 @@ class Copter:
 
     def run_rotors_calibration_routine(self, land_after=True):
         # Spin up motors to hover above current alt
-        current_alt = self.position_g[2]
         calibration_alt = 5.0
         stable_time = 2.0
         history_size = int(stable_time / self.dt)
-        hover_alt = current_alt + calibration_alt
+        hover_alt = self.altitude + calibration_alt
         hover_calibration_complete = False
         hover_prop_torque = 0.0
         history = deque(maxlen=history_size)
@@ -597,10 +596,10 @@ class Copter:
             # Values are negative so max instead of min
             vs_cmd = max(vs_cmd, self.max_landing_descent_speed)
             alt_diff = vs_cmd * self.dt
-            new_pos = self.pos_setpoint[:2] + (self.pos_setpoint[2] + alt_diff,)
+            new_pos = (self.pos_setpoint[0] + alt_diff,) + self.pos_setpoint[1:]
             self.update_setpoint(
                 new_pos,
-                (0.0, 0.0, vs_cmd),
+                (vs_cmd, 0.0, 0.0),
                 self.heading_setpoint
             )
 
