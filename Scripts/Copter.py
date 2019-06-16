@@ -1,7 +1,11 @@
+import datetime
+import os
 import time
 from collections import deque
 
 import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
 
 from Scripts.OrbitTools import OrbitTools
 from Scripts.customPid import PidController
@@ -19,10 +23,10 @@ def main():
     ot = OrbitTools("Copter")
     copter = Copter(ot)
     copter.run_rotors_calibration_routine(land_after=False)
-    location_proximity = 0.002
+    location_proximity = 0.05
 
     copter.update_setpoint(
-        WATER_TOWER_POS + (105,),
+        WATER_TOWER_POS + (120,),
         (0.0, 0.0, 0.0),
         heading=0.0
     )
@@ -30,9 +34,8 @@ def main():
     while error > location_proximity:
         copter.track_set_point()
         error = np.linalg.norm(copter.tracking_error)
-        error -= copter.tracking_error[2]
 
-    print("Arrived at water tower")
+    print("Arrived at water tower: {}".format(len(copter.history)))
     # TODO: Have option in update_setpoint to interpolate to the new setpoint
     # Or make new function that tracks between two setpoints.
 
@@ -46,17 +49,28 @@ def main():
     while error > location_proximity:
         copter.track_set_point()
         error = np.linalg.norm(copter.tracking_error)
-        error -= copter.tracking_error[2]
 
-    print("Arrived at VAB")
+    print("Arrived at VAB: {}".format(len(copter.history)))
 
     copter.landing_sequence()
+    copter.write_history()
+
+
+def sigmoid(x):
+    return 1. / (1. + np.exp(-x))
 
 
 def get_part_name_tag(part):
     for module in part.modules:
         if module.name == "KOSNameTag":
             return module.get_field('name tag')
+
+
+def is_stable(history):
+    for record in history:
+        if abs(record["vs"]) > 1e-1:
+            return False
+    return True
 
 
 class DebugDisplay:
@@ -100,13 +114,6 @@ class Rotor:
         return 1 if self.rotor_module.fields["Rotation Direction"] == "True" else -1
 
 
-def is_stable(history):
-    for record in history:
-        if abs(record["vs"]) > 1e-1:
-            return False
-    return True
-
-
 class Copter:
 
     def __init__(self, ot, freq=30.0):
@@ -114,6 +121,10 @@ class Copter:
         self.vessel = ot.vessel
 
         self.debug_display = DebugDisplay(ot, "({:0.2f}, {:0.2f}, {:0.2f})")
+
+        # Telemetry and Control history
+        self.history = []
+        self.tick_history_frame()
 
         # Coordinate frame setup
         self.surface_frame = None
@@ -152,7 +163,8 @@ class Copter:
         # Controller variables
         self.control_freq = self.dt = None
         self.set_update_freq(freq)  # Hz
-        self.max_tip_angle = np.pi/6.0
+        # self.max_tip_angle = 0.05
+        self.max_tip_angle = 0.1
 
         self.vert_vel_pid = None
         self.vert_accel_pid = None
@@ -174,6 +186,19 @@ class Copter:
         self.rotor_k_m = None
         self.thrust_per_torque = None
         self.altitude_offset = None
+
+    # TODO: Extract telemetry tracking as a class
+    def write_history(self):
+        df = pd.DataFrame(self.history)
+        date_str = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        file_path = "../Telemetry/{}.csv".format(date_str)
+        df.to_csv(open(file_path, mode="w+"))
+
+    def record_item(self, name, value):
+        self.history[-1][name] = value
+
+    def tick_history_frame(self):
+        self.history.append({})
 
     def init_controllers(self):
         # Vertical Speed
@@ -256,7 +281,6 @@ class Copter:
     def _assign_rotors(self):
         assert (self.rotors == [])
         for part in self.vessel.parts.all:
-            # TODO: Check if rotor tag is flight rotor
             if "rotor" in part.name.lower():
                 self.rotors.append(Rotor(part))
         self.num_rotors = len(self.rotors)
@@ -294,6 +318,12 @@ class Copter:
     def control_update(self):
         # Derived from slide 22 of https://bit.ly/2HPIFHl
 
+        self.record_item("x_vel", self.velocity_g[0])
+        self.record_item("y_vel", self.velocity_g[1])
+        self.record_item("z_vel", self.velocity_g[2])
+        self.record_item("altitude", self.altitude)
+        self.record_item("target_alt", self.pos_setpoint[0])
+
         total_thrust = self._vertical_control_helper()
 
         # Compute desired body Moments
@@ -312,6 +342,7 @@ class Copter:
         rotor_torques = rotor_thrusts/self.thrust_per_torque
         self.set_torques(rotor_torques)
         self._update_error_tracking()
+        self.tick_history_frame()
 
     def _vertical_control_helper(self):
         # Compute and return vertical thrust (Global Frame)
@@ -321,6 +352,8 @@ class Copter:
         vs_desired = vs_cmd + self.vel_setpoint[0]
         vs = self.velocity_g[0]
         vert_accel_cmd = self.vert_accel_pid.get_effort(vs_desired, vs, self.dt)
+        self.record_item("vert_accel_cmd", vert_accel_cmd)
+        self.record_item("vs_desired", vs_desired)
 
         desired_vert_accel = vert_accel_cmd + self.gravity
 
@@ -331,8 +364,10 @@ class Copter:
             convert2deg=False
         )
 
-        desired_vert_thrust = self.vessel.mass * desired_vert_accel
-        desired_thrust = desired_vert_thrust / np.cos(angle_from_up)
+        vertical_thrust = self.vessel.mass * desired_vert_accel
+        desired_thrust = vertical_thrust / np.cos(angle_from_up)
+        self.record_item("desired_thrust", desired_thrust)
+        self.record_item("vertical_thrust", vertical_thrust)
         return desired_thrust
 
     def _horizontal_control_helper(self, total_thrust):
@@ -344,6 +379,9 @@ class Copter:
         z_vel_cmd = self.z_vel_pid.get_effort(z_target, z_pos, self.dt)
         y_vel_desired = y_vel_cmd + y_vel_target
         z_vel_desired = z_vel_cmd + z_vel_target
+
+        self.record_item("y_vel_desired", y_vel_desired)
+        self.record_item("z_vel_desired", z_vel_desired)
 
         # Compute desired acceleration
         x_vel, y_vel, z_vel = self.velocity_g
@@ -365,10 +403,9 @@ class Copter:
             T_y_g *= scale_factor
             T_z_g *= scale_factor
         T_g = np.array([T_x_g, T_y_g, T_z_g])
-
-        self.debug_display.update((T_y_g/self.vessel.mass,
-                                   T_z_g/self.vessel.mass,
-                                   T_x_g/self.vessel.mass))
+        self.record_item("T_x_g", T_x_g)
+        self.record_item("T_y_g", T_y_g)
+        self.record_item("T_z_g", T_z_g)
 
         # Compute velocity in body frame
         c_roll, s_roll = np.cos(self.roll), np.sin(self.roll)
@@ -408,6 +445,14 @@ class Copter:
         elif yaw_desired - self.yaw < -np.pi:
             yaw_desired += 2.0*np.pi
 
+        self.record_item("roll", self.roll)
+        self.record_item("pitch", self.pitch)
+        self.record_item("yaw", self.yaw)
+
+        self.record_item("roll_desired", roll_desired)
+        self.record_item("pitch_desired", pitch_desired)
+        self.record_item("yaw_desired", yaw_desired)
+
         # Compute desired pitch/roll rates to meet desired pitch/roll
         roll_rate = -self.roll_rate_pid.get_effort(roll_desired, self.roll, self.dt)
         pitch_rate = -self.pitch_rate_pid.get_effort(pitch_desired, self.pitch, self.dt)
@@ -439,6 +484,12 @@ class Copter:
         M_y = -(q_dot - (J_z - J_x)*(p*r)/J_y)*J_y
         M_z = -(r_dot - (J_x - J_y)*(p*q)/J_z)*J_z
         desired_moment_body = np.array([M_x, M_y, M_z]).reshape(-1, 1)
+
+        self.record_item("M_x", M_x)
+        self.record_item("M_y", M_y)
+        self.record_item("M_z", M_z)
+
+        self.debug_display.update(desired_moment_body.reshape(-1))
 
         return desired_moment_body
 
@@ -588,13 +639,16 @@ class Copter:
 
         self.is_calibrated = True
 
-    def landing_sequence(self):
+    def landing_sequence(self, ease_time=10.0):
         print("Landing sequence started.")
+        landing_start = time.time()
         while self.situation != self.ot.ksc.VesselSituation.landed:
             self.update_state()
+            time_elapsed = time.time()-landing_start
+            ease_in_factor = sigmoid(0.5*(time_elapsed-ease_time))
             vs_cmd = self.landing_descent_speed - self.radar_alt*0.2
             # Values are negative so max instead of min
-            vs_cmd = max(vs_cmd, self.max_landing_descent_speed)
+            vs_cmd = max(vs_cmd*ease_in_factor, self.max_landing_descent_speed)
             alt_diff = vs_cmd * self.dt
             new_pos = (self.pos_setpoint[0] + alt_diff,) + self.pos_setpoint[1:]
             self.update_setpoint(
