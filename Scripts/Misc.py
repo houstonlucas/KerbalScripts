@@ -1,6 +1,9 @@
 import time
 import numpy as np
 
+DEGREES = np.pi / 180.0
+
+# TODO: move mining to it's own file.
 class MiningOperations:
     def __init__(self, ot):
         self.ot = ot

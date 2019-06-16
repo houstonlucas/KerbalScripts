@@ -1,15 +1,13 @@
 import datetime
-import os
 import time
 from collections import deque
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 
 from Scripts.OrbitTools import OrbitTools
 from Scripts.customPid import PidController
-from Scripts.Misc import angle_between_vectors, norm
+from Scripts.Misc import angle_between_vectors, norm, DEGREES
 
 TORQUE_FIELD_STR = 'Torque Limit(%)'
 
@@ -23,10 +21,10 @@ def main():
     ot = OrbitTools("Copter")
     copter = Copter(ot)
     copter.run_rotors_calibration_routine(land_after=False)
-    location_proximity = 0.05
+    location_proximity = 0.1
 
     copter.update_setpoint(
-        WATER_TOWER_POS + (120,),
+        (120,) + WATER_TOWER_POS,
         (0.0, 0.0, 0.0),
         heading=0.0
     )
@@ -40,7 +38,7 @@ def main():
     # Or make new function that tracks between two setpoints.
 
     copter.update_setpoint(
-        VAB_POS + (185,),
+        (120,) + LAUNCH_POS,
         (0.0, 0.0, 0.0),
         heading=0.0
     )
@@ -211,7 +209,7 @@ class Copter:
         )
 
         # Vertical Acceleration
-        vert_accel_gains = (1.8, 0.0, 0.0)
+        vert_accel_gains = (1.8, 0.0, 0.0001)
         vert_accel_bounds = (-2.0, 2.0)
         self.vert_accel_pid = PidController(
             gains=vert_accel_gains,
@@ -219,8 +217,8 @@ class Copter:
         )
 
         # Lateral Velocity
-        lateral_vel_gains = (2500.0, 0.0, 400.0)
-        lateral_vel_bounds = (-20, 20)
+        lateral_vel_gains = (0.8, 0.0, 0.4)
+        lateral_vel_bounds = (-10, 10)
         self.y_vel_pid = PidController(
             gains=lateral_vel_gains,
             effort_bounds=lateral_vel_bounds
@@ -231,7 +229,7 @@ class Copter:
         )
 
         # Lateral Acceleration
-        lateral_accel_gains = (0.8, 0.0, 0.0)
+        lateral_accel_gains = (0.8, 0.0, 0.001)
         lateral_accel_bounds = (-10, 10)
         self.y_accel_pid = PidController(
             gains=lateral_accel_gains,
@@ -254,7 +252,7 @@ class Copter:
             effort_bounds=roll_pitch_rate_bounds
         )
 
-        yaw_gains = (0.2, 0.0, 0.2)
+        yaw_gains = (1.0, 0.0, 0.2)
         yaw_bounds = (-1.0, 1.0)
         self.yaw_rate_pid = PidController(
             gains=yaw_gains,
@@ -371,10 +369,20 @@ class Copter:
         return desired_thrust
 
     def _horizontal_control_helper(self, total_thrust):
-        # Compute desired velocity
-        _, y_target, z_target = self.pos_setpoint
+        _, lat_target, lon_target = self.pos_setpoint
         _, y_vel_target, z_vel_target = self.vel_setpoint
-        _, y_pos, z_pos = self.position_g
+        _, lat, lon = self.position_g
+
+        # Convert to meters
+        y_target, z_target = self.convert_lat_lon_to_meters(lat_target, lon_target)
+        y_pos, z_pos = self.convert_lat_lon_to_meters(lat, lon)
+
+        self.record_item("y_pos", y_pos)
+        self.record_item("z_pos", z_pos)
+        self.record_item("y_pos_target", y_target)
+        self.record_item("z_pos_target", z_target)
+
+        # Compute desired velocity
         y_vel_cmd = self.y_vel_pid.get_effort(y_target, y_pos, self.dt)
         z_vel_cmd = self.z_vel_pid.get_effort(z_target, z_pos, self.dt)
         y_vel_desired = y_vel_cmd + y_vel_target
@@ -680,13 +688,21 @@ class Copter:
 
     def _update_error_tracking(self):
         altitude_error = self.vert_vel_pid.e_prev
-        latitude_error = self.y_vel_pid.e_prev
-        longitude_error = self.z_vel_pid.e_prev
+        y_pos_error = self.y_vel_pid.e_prev
+        z_pos_error = self.z_vel_pid.e_prev
 
         # Convert to meters
         self.tracking_error = np.array([
-            latitude_error*100.0, longitude_error*100.0, altitude_error
+            altitude_error, y_pos_error, z_pos_error
         ])
+
+    # Naive Implementation, should work near KSC/equator
+    def convert_lat_lon_to_meters(self, lat, lon):
+        r = self.body.equatorial_radius
+        latitude_r = r * np.cos(lat*DEGREES)
+        y = lat*DEGREES*r
+        z = lon*DEGREES*latitude_r
+        return y, z
 
 
 if __name__ == '__main__':

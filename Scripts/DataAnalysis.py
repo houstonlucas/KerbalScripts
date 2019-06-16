@@ -15,6 +15,12 @@ selected_file = telemetry_files[-1]
 file_path = selected_file
 df = pd.read_csv(file_path)
 
+df[["y_pos", "y_pos_target"]].plot()
+plt.show()
+
+df[["z_pos", "z_pos_target"]].plot()
+plt.show()
+
 df[["y_vel", "y_vel_desired"]].plot()
 plt.show()
 
