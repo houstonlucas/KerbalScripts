@@ -1,7 +1,7 @@
 import time
 import krpc
-from customPid import PidController
-from RendezvousTools import *
+from Scripts.customPid import PidController
+from Scripts.RendezvousTools import *
 from math import e
 import numpy as np
 
@@ -27,6 +27,7 @@ class OrbitTools:
             'vertical_speed'
         )
 
+        # TODO: Move launch related things into a separate file like docking.
         # Control Parameters
         self.ascent_angle_flatten_alt = 33000
         self.parking_orbit_alt = 85000
@@ -45,6 +46,7 @@ class OrbitTools:
         if body_name == "Kerbin":
             self.parking_orbit_alt = 75000
             self.ascent_angle_flatten_alt = 33000
+
         elif body_name == "Ike":
             self.parking_orbit_alt = 54000
             self.ascent_angle_flatten_alt = 8000
@@ -390,6 +392,8 @@ class OrbitTools:
         time.sleep(burn_time)
         self.vessel.control.throttle = 0.0
 
+    # TODO: Have vessels be their own objects that encompass this
+    # ^ This would allow for multiple vessel control more easily.
     def auto_off(self):
         self.vessel.auto_pilot.disengage()
         self.vessel.control.sas = True
@@ -398,3 +402,6 @@ class OrbitTools:
     def auto_on(self):
         self.vessel.control.sas = False
         self.vessel.auto_pilot.engage()
+
+    def get_vessels_by_criterion(self, criterion):
+        return [vessel for vessel in self.ksc.vessels if criterion(vessel)]
