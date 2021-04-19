@@ -9,7 +9,7 @@ class DockingInstance:
 
         self.settle_factor = 100.0
         self.cone_slope = 20.0
-        self.min_cone_width = 0.01
+        self.min_cone_width = 0.05
 
         self.cone_width = None
         self.settled_speed = None
@@ -185,6 +185,7 @@ def docking_assist(ot):
         iterations += 1
         docking_controller.compute_controls(dt)
         docking_controller.apply_controls()
+        docking_controller.orient_to_target(wait=False)
         if iterations % 10 == 0:
             docking_controller.cycle_rcs()
             docking_controller.print_stats()

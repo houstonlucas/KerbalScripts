@@ -7,20 +7,21 @@ import pandas as pd
 
 from Scripts.OrbitTools import OrbitTools
 from Scripts.customPid import PidController
-from Scripts.Misc import angle_between_vectors, norm, DEGREES
+from Scripts.Misc import angle_between_vectors, norm, DEGREES, sigmoid
 
-TORQUE_FIELD_STR = 'Torque Limit(%)'
 
 VAB_POS = (-0.09681, -74.6174)
+HELIPAD2 = (-0.09681, -74.6201)
 LAUNCH_POS = (-0.09718, -74.5577)
 WATER_TOWER_POS = (-0.09210, -74.55251)
 TRACKING_STATION_POS = (-0.12723, -74.60533)
+NEW_POS = (-0.09257, -74.66312)
 
 
 def main():
     ot = OrbitTools("Copter")
 
-    copter_vessel = ot.get_vessels_by_criterion(lambda vessel: "copter" in vessel.name.lower())[0]
+    copter_vessel = ot.get_vessels_by_criterion(lambda vessel: "carrier" in vessel.name.lower())[0]
     copter = CopterController(ot, copter_vessel)
     copter.run_rotors_calibration_routine()
 
@@ -28,78 +29,51 @@ def main():
     # Or make new function that tracks between two setpoints.
     # TODO: Have copter track desired altitude, interface to change
     # ^ This simplifies setpoint update to just position var
-    copter.update_setpoint((220,) + TRACKING_STATION_POS)
+    copter.update_setpoint((200,) + LAUNCH_POS)
     while not copter.is_setpoint_satisfied():
         copter.track_set_point()
 
-    copter.update_setpoint((220,) + VAB_POS)
+    copter.update_setpoint((200,) + VAB_POS)
     while not copter.is_setpoint_satisfied():
         copter.track_set_point()
 
-    carrier_vessel = ot.get_vessels_by_criterion(lambda vessel: "carrier" in vessel.name.lower())[0]
-    carrier = CopterController(ot, carrier_vessel)
-    carrier.max_tip_angle = 5.0 * DEGREES
-    carrier.calibration_init()
-    while not carrier.is_calibrated:
-        carrier.calibration_routine_step()
-        copter.track_set_point()
+    # copter.update_setpoint((90,) + LAUNCH_POS)
+    # while not copter.is_setpoint_satisfied():
+    #     copter.track_set_point()
 
-    carrier.update_setpoint((217,) + VAB_POS)
-    while not carrier.is_setpoint_satisfied():
-        carrier.track_set_point(should_sleep=False)
-        copter.track_set_point(should_sleep=False)
+    # carrier_vessel = ot.get_vessels_by_criterion(lambda vessel: "carrier" in vessel.name.lower())[0]
+    # carrier = CopterController(ot, carrier_vessel)
+    # carrier.max_tip_angle = 5.0 * DEGREES
+    # carrier.calibration_init()
+    # while not carrier.is_calibrated:
+    #     carrier.calibration_routine_step()
+    #     copter.track_set_point()
+    #
+    # carrier.update_setpoint((216,) + VAB_POS)
+    # while not carrier.is_setpoint_satisfied():
+    #     carrier.track_set_point(should_sleep=False)
+    #     try:
+    #         copter.track_set_point(should_sleep=False)
+    #     except:
+    #         pass
+    # carrier.landing_init()
+    # while carrier.situation != ot.ksc.VesselSituation.landed:
+    #     carrier.landing_step(should_sleep=False)
+    #     # copter.track_set_point()
+    #
+    # carrier.zero_torques()
 
-    carrier.landing_init()
-    while carrier.situation != ot.ksc.VesselSituation.landed:
-        carrier.landing_step(should_sleep=False)
-        copter.track_set_point()
-
-    carrier.zero_torques()
-
-    copter.update_setpoint((220,) + TRACKING_STATION_POS)
-    while not copter.is_setpoint_satisfied():
-        copter.track_set_point()
-
-    copter.update_setpoint((120,) + TRACKING_STATION_POS)
-    while not copter.is_setpoint_satisfied():
-        copter.track_set_point()
+    # copter.update_setpoint((220,) + HELIPAD2)
+    # while not copter.is_setpoint_satisfied():
+    #     copter.track_set_point()
 
     copter.landing_sequence()
     copter.write_history()
 
 
-def sigmoid(x):
-    return 1. / (1. + np.exp(-x))
+class KrpcRotor:
+    TORQUE_FIELD_STR = 'Torque Limit(%)'
 
-
-def get_part_name_tag(part):
-    for module in part.modules:
-        if module.name == "KOSNameTag":
-            return module.get_field('name tag')
-
-
-class DebugDisplay:
-    def __init__(self, ot, format_str):
-        # UI
-        self.canvas = ot.conn.ui.stock_canvas
-        self.display_panel = self.canvas.add_panel()
-        ss = self.canvas.rect_transform.size
-        # TODO: modularize size/position info
-        self.display_panel.rect_transform.size = (280, 50)
-        display_pos = (100.0 - (ss[0] / 2.0), (ss[1] / 2.0) - 60.0)
-        self.display_panel.rect_transform.position = display_pos
-        self.display_format_str = format_str
-        self.display_text = self.display_panel.add_text("")
-
-    def __del__(self):
-        self.display_panel.remove()
-
-    def update(self, data):
-        display_str = self.display_format_str.format(*data)
-        self.display_text.content = display_str
-
-
-class Rotor:
     def __init__(self, part):
         self.part = part
         self.rotor_module = None
@@ -112,7 +86,7 @@ class Rotor:
         assert (self.rotor_module is not None)
 
     def set_torque(self, torque):
-        self.rotor_module.set_field_float(TORQUE_FIELD_STR, torque)
+        self.rotor_module.set_field_float(KrpcRotor.TORQUE_FIELD_STR, torque)
 
     def get_counter_torque_direction(self):
         # Return 1 if cw, -1 if ccw
@@ -120,6 +94,8 @@ class Rotor:
 
 
 # TODO: Implement logging system
+# TODO: Extract a BaseController parent class
+#  ^ Allows most of the groundwork for new controllers to be inherited.
 class CopterController:
 
     def __init__(self, ot, vessel):
@@ -130,7 +106,7 @@ class CopterController:
         self.control_freq = self.dt = 0.0
 
         # TODO: Create config file for below things * pid variables
-        freq = 30.0
+        freq = 30.0  # Hz
         self.calibration_alt = 5.0
         self.calibration_stable_time = 2.0
         self.max_tip_angle = 25.0 * DEGREES
@@ -138,9 +114,9 @@ class CopterController:
         self.max_landing_descent_speed = -4.0
         self.landing_ease_time = 10.0
 
-        self.set_update_freq(freq)  # Hz
+        self.set_update_freq(freq)
 
-        self.debug_display = DebugDisplay(ot, "({:0.2f}, {:0.2f}, {:0.2f})")
+        # self.debug_display = DebugDisplay(ot, "({:0.2f}, {:0.2f}, {:0.2f})")
 
         # Telemetry and Control history
         self.history = []
@@ -219,7 +195,7 @@ class CopterController:
 
     def init_controllers(self):
         # Vertical Speed
-        vs_gains = (0.8, 0.1, 0.2)
+        vs_gains = (0.3, 0.0, 0.2)
         vs_bounds = (-5.0, 5.0)
         self.vert_vel_pid = PidController(
             gains=vs_gains,
@@ -228,7 +204,7 @@ class CopterController:
         )
 
         # Vertical Acceleration
-        vert_accel_gains = (1.8, 0.0, 0.0001)
+        vert_accel_gains = (1.0, 0.0, 0.001)
         vert_accel_bounds = (-4.0, 4.0)
         self.vert_accel_pid = PidController(
             gains=vert_accel_gains,
@@ -236,7 +212,7 @@ class CopterController:
         )
 
         # Lateral Velocity
-        lateral_vel_gains = (0.6, 0.0, 0.5)
+        lateral_vel_gains = (0.2, 0.0, 0.0001)
         lateral_vel_bounds = (-15, 15)
         self.lateral_vel_pid = PidController(
             gains=lateral_vel_gains,
@@ -252,7 +228,7 @@ class CopterController:
         )
 
         # Lateral Acceleration
-        lateral_accel_gains = (0.8, 0.0, 0.001)
+        lateral_accel_gains = (0.2, 0.0, 0.001)
         lateral_accel_bounds = (-3.0, 3.0)
         self.lateral_accel_pid = PidController(
             gains=lateral_accel_gains,
@@ -268,7 +244,7 @@ class CopterController:
         )
 
         # Roll and Pitch Rates
-        roll_pitch_rate_gains = (1.8, 0.0, 1.0)
+        roll_pitch_rate_gains = (3.2, 0.0, 1.5)
         roll_pitch_rate_bounds = (-10.0, 10.0)
         self.roll_rate_pid = PidController(
             gains=roll_pitch_rate_gains,
@@ -307,7 +283,7 @@ class CopterController:
         assert (self.rotors == [])
         for part in self.vessel.parts.all:
             if "rotor" in part.name.lower():
-                self.rotors.append(Rotor(part))
+                self.rotors.append(KrpcRotor(part))
         self.num_rotors = len(self.rotors)
 
     def _compute_moment_conversion_matrix(self):
@@ -395,7 +371,7 @@ class CopterController:
         self.record_item("vertical_thrust", vertical_thrust)
         return desired_thrust
 
-    def _horizontal_control_helper(self, total_thrust):
+    def _compute_desired_horizontal_velocity(self):
         _, lat_target, lon_target = self.pos_setpoint
         _, y_vel_target, z_vel_target = self.vel_setpoint
         _, lat, lon = self.position_g
@@ -425,7 +401,9 @@ class CopterController:
 
         self.record_item("y_vel_desired", y_vel_desired)
         self.record_item("z_vel_desired", z_vel_desired)
+        return y_vel_desired, z_vel_desired
 
+    def _compute_desired_thrust_vector(self, total_thrust, y_vel_desired, z_vel_desired):
         # Compute desired acceleration
         x_vel, y_vel, z_vel = self.velocity_g
         y_accel_desired = self.y_accel_pid.get_effort(y_vel_desired, y_vel, self.dt)
@@ -449,6 +427,12 @@ class CopterController:
         self.record_item("T_x_g", T_x_g)
         self.record_item("T_y_g", T_y_g)
         self.record_item("T_z_g", T_z_g)
+        return T_g
+
+    def _horizontal_control_helper(self, total_thrust):
+        y_vel_desired, z_vel_desired = self._compute_desired_horizontal_velocity()
+
+        T_g = self._compute_desired_thrust_vector(total_thrust, y_vel_desired, z_vel_desired)
 
         # Compute velocity in body frame
         c_roll, s_roll = np.cos(self.roll), np.sin(self.roll)
@@ -532,7 +516,7 @@ class CopterController:
         self.record_item("M_y", M_y)
         self.record_item("M_z", M_z)
 
-        self.debug_display.update(desired_moment_body.reshape(-1))
+        # self.debug_display.update(desired_moment_body.reshape(-1))
 
         return desired_moment_body
 
@@ -613,7 +597,7 @@ class CopterController:
         ) - np.pi / 2.0
 
     def zero_torques(self):
-        self.set_torques([0.0]*self.num_rotors)
+        self.set_torques([0.0] * self.num_rotors)
 
     def set_torques(self, torques):
         largest_value = np.max(torques)

@@ -1,13 +1,18 @@
 class PidController:
     def __init__(self, gains=(0.0, 0.0, 0.0),
                  effort_bounds=(-1.0, 1.0),
-                 integral_threshold=0.25):
+                 integral_threshold=0.25,
+                 dt=1/30.0):
         self.k_p, self.k_i, self.k_d = gains
         self.e_prev, self.i_prev = None, 0.0
         self.min_effort, self.max_effort = effort_bounds
         self.integration_threshold = integral_threshold
+        self.dt = dt
 
-    def get_effort(self, target, measurement, dt):
+    def get_effort(self, target, measurement, dt=None):
+        if dt is None:
+            dt = self.dt
+
         if self.e_prev is None:
             self.e_prev = target - measurement
 

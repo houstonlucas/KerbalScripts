@@ -22,16 +22,34 @@ def fuel_efficient_circularization(ot, nd):
 
 
 def closest_target_distance(ot, nd):
+    target = ot.get_target()
     targets_orbit = ot.get_target_orbit()
     orbit = nd.node.orbit
+    temp_orbit = orbit
+    use_periapsis = False
+    while temp_orbit.next_orbit:
+        if orbit.next_orbit.body.name == targets_orbit.body.name:
+            orbit = orbit.next_orbit
+        elif orbit.next_orbit.body == target:
+            orbit = orbit.next_orbit
+            use_periapsis = True
+            break
+        temp_orbit = temp_orbit.next_orbit
+
     if targets_orbit is None:
         error = errors.AssumptionViolation()
         error.msg = "Error no target selected"
         raise error
-    closest = orbit.distance_at_closest_approach(targets_orbit)
+
+    offset = 0.0
+    if use_periapsis:
+        closest = orbit.periapsis
+        offset = 1000.0
+    else:
+        closest = orbit.distance_at_closest_approach(targets_orbit)
     target_dist = 150000
-    target_error = np.abs(target_dist - closest)/1e-4
-    return target_error + 100.0 * nd.node.delta_v
+    target_error = np.abs(target_dist - closest)/1e4
+    return target_error + 10.0 * nd.node.delta_v  - offset
 
 
 class ManeuverNode:
@@ -64,14 +82,14 @@ class ManeuverPlanner:
             self.node = ManeuverNode(self.ot.vessel.control.nodes[0])
         else:
             if node_ut is None:
-                node_ut = self.ot.ksc.ut + 1000000.0#self.ot.vessel.orbit.time_to_periapsis
+                node_ut = self.ot.ksc.ut + 1000000.0  # self.ot.vessel.orbit.time_to_periapsis
             nd = self.ot.vessel.control.add_node(node_ut, 0.0)
             self.node = ManeuverNode(nd)
 
         self.grad = None
 
     def find_maneuver(self):
-        potential_step_sizes = np.array([np.exp(i) for i in np.linspace(-8, 4, 20)])
+        potential_step_sizes = np.array([pow(1.5, i) for i in np.linspace(-8, 4, 20)])
         if self.is_min_problem:
             potential_step_sizes *= -1.0
 
