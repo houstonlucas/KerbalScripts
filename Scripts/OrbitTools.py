@@ -6,6 +6,9 @@ from math import e
 import numpy as np
 
 
+# TODO: Split this class in two:
+#  a core interface to krpc
+#  actual orbital tools
 class OrbitTools:
 
     def __init__(self, script_name):
@@ -31,9 +34,11 @@ class OrbitTools:
         # Control Parameters
         self.ascent_angle_flatten_alt = 33000
         self.parking_orbit_alt = 85000
-        self.close_in_factor = 0.95
+        self.close_in_factor = 0.90
         self.inclination = 90
         self.slow_burn_throttle = 0.2
+        self.gravity_turn_alt = 1000.0
+        self.has_atmos = False
 
         self.twr_pid = PidController(
             gains=(0.05, 0.001, 0.0001),
@@ -46,13 +51,18 @@ class OrbitTools:
         if body_name == "Kerbin":
             self.parking_orbit_alt = 75000
             self.ascent_angle_flatten_alt = 33000
+            self.gravity_turn_alt = 18000.0
+            self.has_atmos = True
 
         elif body_name == "Ike":
             self.parking_orbit_alt = 54000
-            self.ascent_angle_flatten_alt = 8000
+            self.ascent_angle_flatten_alt = 1000
+            self.gravity_turn_alt = 600.0
+
         elif body_name == "Mun":
             self.parking_orbit_alt = 35000
-            self.ascent_angle_flatten_alt = 6000
+            self.ascent_angle_flatten_alt = 600
+            self.gravity_turn_alt = 500.0
         else:
             self.parking_orbit_alt = 54000
             self.ascent_angle_flatten_alt = 8000
@@ -179,6 +189,7 @@ class OrbitTools:
         # Orient ship
         burn_direction = nd.direction(reference_frame)
         ship_direction = self.vessel.direction(reference_frame)
+
         self.auto_on()
         while not np.dot(burn_direction, ship_direction) >= .98:
             self.vessel.auto_pilot.target_direction = burn_direction
@@ -193,7 +204,6 @@ class OrbitTools:
         warp_time = nd.ut - (burn_time / 2.0) - buffer_time
         self.ksc.warp_to(warp_time)
         print("Warping")
-        print(self.ksc, warp_time)
 
         self.auto_on()
         reference_frame = self.vessel.surface_reference_frame
@@ -275,8 +285,10 @@ class OrbitTools:
             time.sleep(1)
 
     def get_ascent_angle(self, ):
-        altitude_ratio = self.altitude() / self.ascent_angle_flatten_alt
-        return max(5, 90 - (90 * altitude_ratio))
+        height_above_turn = self.altitude() - self.gravity_turn_alt
+        distance_to_flatten = self.ascent_angle_flatten_alt - self.gravity_turn_alt
+        altitude_ratio = max(0, height_above_turn / distance_to_flatten)
+        return max(0, 90 - (90 * altitude_ratio))
 
     def set_twr(self, twr_target, dt):
         weight = (self.mass() * self.vessel.orbit.body.surface_gravity)
@@ -293,8 +305,8 @@ class OrbitTools:
         initial_twr = 2.0
         initial_speed_trigger = 150.0
         secondary_speed_trigger = 280.0
-        low_atmos_twr = 1.6
-        upper_atmos_twr = 3.0
+        low_atmos_twr = 2.6
+        upper_atmos_twr = 10.0
 
         # Note each condition conjuncts with the inverse of the questions before.
         # TODO make this based on air drag
@@ -348,11 +360,6 @@ class OrbitTools:
         self.auto_off()
         print("Done")
 
-    def wait_until_ut(self, ut):
-        self.auto_off()
-        self.ksc.warp_to(ut)
-        self.auto_on()
-
     def zero_relative_velocity(self, target, buffer_time=5.0):
         frame = self.vessel.surface_reference_frame
 
@@ -392,8 +399,8 @@ class OrbitTools:
         time.sleep(burn_time)
         self.vessel.control.throttle = 0.0
 
-    # TODO: Have vessels be their own objects that encompass this
-    # ^ This would allow for multiple vessel control more easily.
+    # TODO: Move below functions into generic interface class to krpc
+
     def auto_off(self):
         self.vessel.auto_pilot.disengage()
         self.vessel.control.sas = True
@@ -405,3 +412,8 @@ class OrbitTools:
 
     def get_vessels_by_criterion(self, criterion):
         return [vessel for vessel in self.ksc.vessels if criterion(vessel)]
+
+    def wait_until_ut(self, ut):
+        self.auto_off()
+        self.ksc.warp_to(ut)
+        self.auto_on()
